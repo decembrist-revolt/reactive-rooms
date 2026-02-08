@@ -1,4 +1,9 @@
 mod api;
+mod auth;
+mod domain;
+mod message_bus;
+mod storage;
+mod websocket;
 
 use api::{not_found, ping};
 use axum::{
