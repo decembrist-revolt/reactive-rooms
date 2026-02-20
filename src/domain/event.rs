@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ToHostEvent {
     JoinRoom,
     LeaveRoom,
@@ -8,20 +8,13 @@ pub enum ToHostEvent {
     Disconnect,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ToUserEvent {
     Message,
     Disconnect,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Event {
-    ToHost(ToHostEvent),
-    ToUser(ToUserEvent),
-}
-
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DisconnectReason {
     Kicked,
     RoomClosed,

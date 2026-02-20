@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct UserId(String);
 
 impl UserId {
@@ -13,11 +13,13 @@ impl UserId {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
     pub id: UserId,
 }
 
+#[allow(dead_code)]
 impl User {
     pub fn new(id: UserId) -> Self {
         Self { id }

@@ -1,6 +1,4 @@
-#![allow(dead_code)]
-
-mod event;
-mod message;
-mod room;
-mod user;
+pub mod event;
+pub mod message;
+pub mod room;
+pub mod user;

@@ -12,13 +12,27 @@ use axum::{
     http::{Method, StatusCode, header},
     routing,
 };
+use axum_keycloak_auth::{
+    NonEmpty, PassthroughMode,
+    extract::{QueryParamTokenExtractor, TokenExtractor},
+    layer::KeycloakAuthLayer,
+};
+use message_bus::MessageBus;
 use mimalloc::MiMalloc;
+use std::sync::Arc;
 use std::time::Duration;
+use storage::RoomStorage;
 use tokio::net::TcpListener;
 use tower_http::{cors::CorsLayer, timeout::TimeoutLayer, trace::TraceLayer};
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
+
+pub struct AppState {
+    pub storage: RoomStorage,
+    pub message_bus: MessageBus,
+    pub keycloak: Arc<axum_keycloak_auth::instance::KeycloakAuthInstance>,
+}
 
 pub struct Server;
 
@@ -31,11 +45,41 @@ impl Server {
         TcpListener::bind(addr).await.expect("the address is busy")
     }
 
-    fn init_router() -> Router {
+    fn init_router(state: Arc<AppState>) -> Router {
         let cors = Self::init_cors();
-        Router::new()
+        let audience = std::env::var("KEYCLOAK_AUDIENCE").unwrap_or_else(|_| "account".to_string());
+
+        // WebSocket auth layer uses query param token extraction
+        let ws_keycloak_layer = KeycloakAuthLayer::<auth::Role>::builder()
+            .instance(state.keycloak.clone())
+            .passthrough_mode(PassthroughMode::Block)
+            .persist_raw_claims(false)
+            .expected_audiences(vec![audience])
+            .token_extractors(NonEmpty::<Arc<dyn TokenExtractor>> {
+                head: Arc::new(QueryParamTokenExtractor::default()),
+                tail: vec![],
+            })
+            .build();
+
+        // WebSocket route with query param auth
+        let ws_routes = Router::new()
+            .route("/websocket", routing::get(websocket::websocket_handler))
+            .layer(ws_keycloak_layer);
+
+        // REST routes with Bearer token auth (layer applied inside routes module)
+        let rest_routes = api::routes::room_routes(state.clone());
+
+        // Public routes
+        let public_routes = Router::new()
             .route("/ping", routing::get(ping))
+            .route("/health", routing::get(ping));
+
+        Router::new()
+            .merge(public_routes)
+            .merge(rest_routes)
+            .merge(ws_routes)
             .fallback(not_found)
+            .with_state(state)
             .layer(cors)
             .layer((
                 TraceLayer::new_for_http(),
@@ -76,8 +120,16 @@ impl Server {
 
     pub async fn run() {
         Self::init_tracing();
+
+        let keycloak = auth::create_keycloak_instance();
+        let state = Arc::new(AppState {
+            storage: RoomStorage::new(),
+            message_bus: MessageBus::new(),
+            keycloak,
+        });
+
         let listener = Self::init_tcp_listener().await;
-        let router = Self::init_router();
+        let router = Self::init_router(state);
 
         tracing::info!("listening on http://{}", listener.local_addr().unwrap());
 

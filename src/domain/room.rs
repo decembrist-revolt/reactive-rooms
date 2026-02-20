@@ -1,10 +1,17 @@
 use std::fmt;
+use std::str::FromStr;
 use super::user::UserId;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RoomId(Uuid);
+
+impl Default for RoomId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl RoomId {
     pub fn new() -> Self {
@@ -18,7 +25,15 @@ impl fmt::Display for RoomId {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+impl FromStr for RoomId {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Uuid::parse_str(s).map(Self)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoomType(String);
 
 impl RoomType {
@@ -31,7 +46,7 @@ impl RoomType {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Room {
     pub id: RoomId,
     pub host_id: UserId,
@@ -55,7 +70,7 @@ impl Room {
         }
     }
 
-    pub fn is_host(&self, user_id: UserId) -> bool {
-        self.host_id == user_id
+    pub fn is_host(&self, user_id: &UserId) -> bool {
+        self.host_id == *user_id
     }
 }

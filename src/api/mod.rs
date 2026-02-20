@@ -1,5 +1,6 @@
-mod handlers;
-mod routes;
+pub mod dto;
+pub mod handlers;
+pub mod routes;
 
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use serde_json::json;

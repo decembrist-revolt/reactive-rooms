@@ -8,7 +8,7 @@ use super::{
 
 pub type MessagePayload = Value;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToHostMessage {
     pub event: ToHostEvent,
     pub user_id: UserId,
@@ -50,7 +50,7 @@ impl ToHostMessage {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToUserMessage {
     pub event: ToUserEvent,
     pub user_id: UserId,
@@ -76,13 +76,13 @@ impl ToUserMessage {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserWebSocketMessage {
     pub event: String,
     pub message: MessagePayload,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostWebSocketMessage {
     pub event: String,
     pub user_id: UserId,
