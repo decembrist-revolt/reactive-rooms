@@ -10,11 +10,11 @@ use axum_keycloak_auth::{decode::KeycloakToken, expect_role};
 
 use crate::{
     AppState,
-    auth::Role,
     api::dto::{
-        CreateRoomRequest, CreateRoomResponse, PaginationParams,
-        RoomWithPlayerCount, RoomsPageResponse,
+        CreateRoomRequest, CreateRoomResponse, PaginationParams, RoomWithPlayerCount,
+        RoomsPageResponse,
     },
+    auth::Role,
     domain::{
         event::DisconnectReason,
         room::{Room, RoomType},
@@ -29,16 +29,16 @@ pub async fn create_room(
 ) -> impl IntoResponse {
     expect_role!(&token, Role::Admin);
 
-    let room = Room::new(
-        UserId::new(&body.host_id),
-        RoomType::new(&body.room_type),
-    );
+    let room = Room::new(UserId::new(&body.host_id), RoomType::new(&body.room_type));
 
     match state.storage.create_room(room) {
         Ok(room_id) => {
             tracing::info!(
                 "Room {} created by user {} for host {} and type {}",
-                room_id, token.subject, body.host_id, body.room_type,
+                room_id,
+                token.subject,
+                body.host_id,
+                body.room_type,
             );
             (
                 StatusCode::CREATED,
@@ -51,7 +51,8 @@ pub async fn create_room(
         Err(_) => {
             tracing::error!(
                 "Failed to create room for host {} and type {}: room already exists",
-                body.host_id, body.room_type,
+                body.host_id,
+                body.room_type,
             );
             (StatusCode::CONFLICT, "Room already exists").into_response()
         }
@@ -77,18 +78,14 @@ pub async fn cancel_room(
     let users = state.storage.clear_room_users(&room_id);
 
     // Disconnect all users
-    state.message_bus.disconnect_room_users(
-        &room_id,
-        &users,
-        DisconnectReason::RoomClosed,
-    );
+    state
+        .message_bus
+        .disconnect_room_users(&room_id, &users, DisconnectReason::RoomClosed);
 
     // Disconnect host
-    state.message_bus.disconnect_host(
-        &room_id,
-        &room.host_id,
-        DisconnectReason::RoomClosed,
-    );
+    state
+        .message_bus
+        .disconnect_host(&room_id, &room.host_id, DisconnectReason::RoomClosed);
 
     // Remove room
     state.storage.remove_room(&room_id);
@@ -128,7 +125,9 @@ pub async fn list_rooms(
 
     tracing::info!(
         "Retrieved rooms page {} with size {}, total rooms: {}",
-        page, size, total,
+        page,
+        size,
+        total,
     );
 
     Json(RoomsPageResponse {

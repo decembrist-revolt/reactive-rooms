@@ -14,13 +14,9 @@ use axum_keycloak_auth::decode::KeycloakToken;
 use crate::{
     AppState,
     api::dto::WsQueryParams,
-    auth::Role,
+    auth::{Role, has_role},
     domain::user::UserId,
 };
-
-fn has_role(token: &KeycloakToken<Role>, role: &Role) -> bool {
-    token.roles.iter().any(|r| r.role() == role)
-}
 
 pub async fn websocket_handler(
     Extension(token): Extension<KeycloakToken<Role>>,
@@ -43,7 +39,7 @@ pub async fn websocket_handler(
     match params.connection_type.as_str() {
         "host" => {
             // Verify user has host role
-            if !has_role(&token, &Role::Host) && !has_role(&token, &Role::Admin) {
+            if !has_role(&token, &Role::Host) {
                 tracing::warn!(
                     "User {} attempted host connection without host role",
                     token.subject
@@ -72,7 +68,7 @@ pub async fn websocket_handler(
         }
         "user" => {
             // Verify user has user role
-            if !has_role(&token, &Role::User) && !has_role(&token, &Role::Admin) {
+            if !has_role(&token, &Role::User) {
                 tracing::warn!(
                     "User {} attempted connection without user role",
                     token.subject

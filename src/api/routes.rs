@@ -1,21 +1,21 @@
 use std::sync::Arc;
 
 use axum::{Router, routing};
-use axum_keycloak_auth::{
-    layer::KeycloakAuthLayer,
-    PassthroughMode,
-};
+use axum_keycloak_auth::{PassthroughMode, layer::KeycloakAuthLayer};
 
-use crate::{AppState, auth::Role};
+use crate::{
+    AppState,
+    auth::{Role, keycloak, keycloak_audience},
+};
 
 use super::handlers;
 
-pub fn room_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
-    let audience =
-        std::env::var("KEYCLOAK_AUDIENCE").unwrap_or_else(|_| "account".to_string());
+pub fn room_routes() -> Router<Arc<AppState>> {
+    let audience = keycloak_audience();
+    let keycloak = keycloak();
 
     let keycloak_layer = KeycloakAuthLayer::<Role>::builder()
-        .instance(state.keycloak.clone())
+        .instance(keycloak.clone())
         .passthrough_mode(PassthroughMode::Block)
         .persist_raw_claims(false)
         .expected_audiences(vec![audience])
@@ -26,6 +26,9 @@ pub fn room_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
             "/api/rooms",
             routing::post(handlers::create_room).get(handlers::list_rooms),
         )
-        .route("/api/rooms/{roomId}", routing::delete(handlers::cancel_room))
+        .route(
+            "/api/rooms/{roomId}",
+            routing::delete(handlers::cancel_room),
+        )
         .layer(keycloak_layer)
 }

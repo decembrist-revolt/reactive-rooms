@@ -1,7 +1,7 @@
-use std::fmt;
-use std::str::FromStr;
 use super::user::UserId;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

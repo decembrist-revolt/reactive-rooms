@@ -31,7 +31,6 @@ static GLOBAL: MiMalloc = MiMalloc;
 pub struct AppState {
     pub storage: RoomStorage,
     pub message_bus: MessageBus,
-    pub keycloak: Arc<axum_keycloak_auth::instance::KeycloakAuthInstance>,
 }
 
 pub struct Server;
@@ -47,11 +46,11 @@ impl Server {
 
     fn init_router(state: Arc<AppState>) -> Router {
         let cors = Self::init_cors();
-        let audience = std::env::var("KEYCLOAK_AUDIENCE").unwrap_or_else(|_| "account".to_string());
+        let audience = auth::keycloak_audience();
 
         // WebSocket auth layer uses query param token extraction
         let ws_keycloak_layer = KeycloakAuthLayer::<auth::Role>::builder()
-            .instance(state.keycloak.clone())
+            .instance(auth::keycloak().clone())
             .passthrough_mode(PassthroughMode::Block)
             .persist_raw_claims(false)
             .expected_audiences(vec![audience])
@@ -67,7 +66,7 @@ impl Server {
             .layer(ws_keycloak_layer);
 
         // REST routes with Bearer token auth (layer applied inside routes module)
-        let rest_routes = api::routes::room_routes(state.clone());
+        let rest_routes = api::routes::room_routes();
 
         // Public routes
         let public_routes = Router::new()
@@ -121,11 +120,10 @@ impl Server {
     pub async fn run() {
         Self::init_tracing();
 
-        let keycloak = auth::create_keycloak_instance();
+        auth::init_keycloak().expect("Failed to initialize Keycloak");
         let state = Arc::new(AppState {
             storage: RoomStorage::new(),
             message_bus: MessageBus::new(),
-            keycloak,
         });
 
         let listener = Self::init_tcp_listener().await;

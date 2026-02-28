@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 axum = { version = "0.8.8", features = ["ws"] }
-axum-keycloak-auth = "0.8"
+axum-keycloak-auth = {version="0.8", default-features = false, features = ["rustls-tls"]}
 dashmap = "6"
 dotenvy = "0.15.7"
 futures-util = "0.3"
