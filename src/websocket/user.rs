@@ -104,20 +104,11 @@ pub async fn handle_user_ws(
     cleanup_user_disconnect(&state, &room_id, &user_id).await;
 }
 
-fn handle_user_message(
-    state: &AppState,
-    room_id: &str,
-    user_id: &UserId,
-    text: &str,
-) {
+fn handle_user_message(state: &AppState, room_id: &str, user_id: &UserId, text: &str) {
     let msg: UserWebSocketMessage = match serde_json::from_str(text) {
         Ok(msg) => msg,
         Err(e) => {
-            tracing::warn!(
-                "Invalid message from user {}: {}",
-                user_id.as_str(),
-                e
-            );
+            tracing::warn!("Invalid message from user {}: {}", user_id.as_str(), e);
             return;
         }
     };
@@ -130,21 +121,17 @@ fn handle_user_message(
             );
         }
         other => {
-            tracing::warn!(
-                "Unknown event '{}' from user {}",
-                other,
-                user_id.as_str()
-            );
+            tracing::warn!("Unknown event '{}' from user {}", other, user_id.as_str());
         }
     }
 }
 
-async fn cleanup_user_disconnect(
-    state: &AppState,
-    room_id: &str,
-    user_id: &UserId,
-) {
-    tracing::info!("User {} disconnected from room {}", user_id.as_str(), room_id);
+async fn cleanup_user_disconnect(state: &AppState, room_id: &str, user_id: &UserId) {
+    tracing::info!(
+        "User {} disconnected from room {}",
+        user_id.as_str(),
+        room_id
+    );
 
     // Remove user from room
     state.storage.remove_user_from_room(room_id, user_id);

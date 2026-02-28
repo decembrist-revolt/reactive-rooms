@@ -49,11 +49,7 @@ impl MessageBus {
 
     /// Register a user channel. If the user already has a connection,
     /// send a Disconnect(NewConnection) to the old channel first.
-    pub fn register_user(
-        &self,
-        user_id: &UserId,
-        room_id: &str,
-    ) -> mpsc::Receiver<ToUserMessage> {
+    pub fn register_user(&self, user_id: &UserId, room_id: &str) -> mpsc::Receiver<ToUserMessage> {
         let key = user_channel_key(user_id, room_id);
         let (tx, rx) = mpsc::channel(CHANNEL_BUFFER);
 
@@ -80,7 +76,12 @@ impl MessageBus {
     }
 
     /// Disconnect all users in a room by sending Disconnect messages
-    pub fn disconnect_room_users(&self, room_id: &str, user_ids: &[UserId], reason: DisconnectReason) {
+    pub fn disconnect_room_users(
+        &self,
+        room_id: &str,
+        user_ids: &[UserId],
+        reason: DisconnectReason,
+    ) {
         for user_id in user_ids {
             self.send_to_user(
                 user_id,
@@ -92,10 +93,7 @@ impl MessageBus {
 
     /// Disconnect the host of a room
     pub fn disconnect_host(&self, room_id: &str, host_id: &UserId, reason: DisconnectReason) {
-        self.send_to_host(
-            room_id,
-            ToHostMessage::disconnect(host_id.clone(), reason),
-        );
+        self.send_to_host(room_id, ToHostMessage::disconnect(host_id.clone(), reason));
     }
 }
 

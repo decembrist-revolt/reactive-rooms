@@ -51,20 +51,16 @@ pub async fn websocket_handler(
             if !room.is_host(&user_id) {
                 tracing::warn!(
                     "User {} attempted host connection to room {} but is not the host",
-                    token.subject, room_id_str
+                    token.subject,
+                    room_id_str
                 );
                 return (StatusCode::FORBIDDEN, "Not the room host").into_response();
             }
 
-            tracing::info!(
-                "Host {} connecting to room {}",
-                token.subject, room_id_str
-            );
+            tracing::info!("Host {} connecting to room {}", token.subject, room_id_str);
 
-            ws.on_upgrade(move |socket| {
-                host::handle_host_ws(socket, state, room_id_str, user_id)
-            })
-            .into_response()
+            ws.on_upgrade(move |socket| host::handle_host_ws(socket, state, room_id_str, user_id))
+                .into_response()
         }
         "user" => {
             // Verify user has user role
@@ -76,15 +72,10 @@ pub async fn websocket_handler(
                 return (StatusCode::FORBIDDEN, "User role required").into_response();
             }
 
-            tracing::info!(
-                "User {} connecting to room {}",
-                token.subject, room_id_str
-            );
+            tracing::info!("User {} connecting to room {}", token.subject, room_id_str);
 
-            ws.on_upgrade(move |socket| {
-                user::handle_user_ws(socket, state, room_id_str, user_id)
-            })
-            .into_response()
+            ws.on_upgrade(move |socket| user::handle_user_ws(socket, state, room_id_str, user_id))
+                .into_response()
         }
         _ => (StatusCode::BAD_REQUEST, "Invalid connection type").into_response(),
     }

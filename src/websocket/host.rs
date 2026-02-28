@@ -102,20 +102,11 @@ pub async fn handle_host_ws(
     cleanup_host_disconnect(&state, &room_id, &host_id).await;
 }
 
-fn handle_host_message(
-    state: &AppState,
-    room_id: &str,
-    host_id: &UserId,
-    text: &str,
-) {
+fn handle_host_message(state: &AppState, room_id: &str, host_id: &UserId, text: &str) {
     let msg: HostWebSocketMessage = match serde_json::from_str(text) {
         Ok(msg) => msg,
         Err(e) => {
-            tracing::warn!(
-                "Invalid message from host {}: {}",
-                host_id.as_str(),
-                e
-            );
+            tracing::warn!("Invalid message from host {}: {}", host_id.as_str(), e);
             return;
         }
     };
@@ -146,39 +137,30 @@ fn handle_host_message(
             state.message_bus.send_to_user(
                 target_user_id,
                 room_id,
-                ToUserMessage::disconnect(
-                    target_user_id.clone(),
-                    DisconnectReason::Kicked,
-                ),
+                ToUserMessage::disconnect(target_user_id.clone(), DisconnectReason::Kicked),
             );
         }
         other => {
-            tracing::warn!(
-                "Unknown event '{}' from host {}",
-                other,
-                host_id.as_str()
-            );
+            tracing::warn!("Unknown event '{}' from host {}", other, host_id.as_str());
         }
     }
 }
 
-async fn cleanup_host_disconnect(
-    state: &AppState,
-    room_id: &str,
-    host_id: &UserId,
-) {
-    tracing::info!("Host {} disconnected from room {}", host_id.as_str(), room_id);
+async fn cleanup_host_disconnect(state: &AppState, room_id: &str, host_id: &UserId) {
+    tracing::info!(
+        "Host {} disconnected from room {}",
+        host_id.as_str(),
+        room_id
+    );
 
     // Unregister host channel
     state.message_bus.unregister_host(room_id);
 
     // Get all users and disconnect them
     let users = state.storage.clear_room_users(room_id);
-    state.message_bus.disconnect_room_users(
-        room_id,
-        &users,
-        DisconnectReason::RoomClosed,
-    );
+    state
+        .message_bus
+        .disconnect_room_users(room_id, &users, DisconnectReason::RoomClosed);
 
     // Remove room
     state.storage.remove_room(room_id);
