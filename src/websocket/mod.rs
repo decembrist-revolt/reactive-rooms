@@ -15,7 +15,7 @@ use crate::{
     AppState,
     api::dto::WsQueryParams,
     auth::{Role, has_role},
-    domain::user::UserId,
+    domain::{room::RoomId, user::UserId},
 };
 
 pub async fn websocket_handler(
@@ -25,13 +25,23 @@ pub async fn websocket_handler(
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     let user_id = UserId::new(&token.subject);
-    let room_id_str = params.room_id.clone();
+
+    let room_id = match params.room_id.parse::<RoomId>() {
+        Ok(id) => id,
+        Err(_) => {
+            tracing::warn!(
+                "WebSocket connection with invalid room ID {}",
+                params.room_id
+            );
+            return (StatusCode::BAD_REQUEST, "Invalid room ID").into_response();
+        }
+    };
 
     // Validate room exists
-    let room = match state.storage.get_room(&room_id_str) {
+    let room = match state.storage.get_room(&room_id) {
         Some(room) => room,
         None => {
-            tracing::warn!("WebSocket connection to non-existent room {}", room_id_str);
+            tracing::warn!("WebSocket connection to non-existent room {}", room_id);
             return (StatusCode::NOT_FOUND, "Room not found").into_response();
         }
     };
@@ -52,14 +62,14 @@ pub async fn websocket_handler(
                 tracing::warn!(
                     "User {} attempted host connection to room {} but is not the host",
                     token.subject,
-                    room_id_str
+                    room_id
                 );
                 return (StatusCode::FORBIDDEN, "Not the room host").into_response();
             }
 
-            tracing::info!("Host {} connecting to room {}", token.subject, room_id_str);
+            tracing::info!("Host {} connecting to room {}", token.subject, room_id);
 
-            ws.on_upgrade(move |socket| host::handle_host_ws(socket, state, room_id_str, user_id))
+            ws.on_upgrade(move |socket| host::handle_host_ws(socket, state, room_id, user_id))
                 .into_response()
         }
         "user" => {
@@ -72,9 +82,9 @@ pub async fn websocket_handler(
                 return (StatusCode::FORBIDDEN, "User role required").into_response();
             }
 
-            tracing::info!("User {} connecting to room {}", token.subject, room_id_str);
+            tracing::info!("User {} connecting to room {}", token.subject, room_id);
 
-            ws.on_upgrade(move |socket| user::handle_user_ws(socket, state, room_id_str, user_id))
+            ws.on_upgrade(move |socket| user::handle_user_ws(socket, state, room_id, user_id))
                 .into_response()
         }
         _ => (StatusCode::BAD_REQUEST, "Invalid connection type").into_response(),

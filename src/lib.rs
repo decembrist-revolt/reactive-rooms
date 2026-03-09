@@ -121,8 +121,9 @@ impl Server {
         Self::init_tracing();
 
         auth::init_keycloak().expect("Failed to initialize Keycloak");
+        let max_rooms = read_env_var("MAX_ROOMS", "10000").parse().unwrap_or(10_000);
         let state = Arc::new(AppState {
-            storage: RoomStorage::new(),
+            storage: RoomStorage::new(max_rooms),
             message_bus: MessageBus::new(),
         });
 

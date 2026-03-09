@@ -10,6 +10,7 @@ use crate::{
     domain::{
         event::ToUserEvent,
         message::{ToHostMessage, UserWebSocketMessage},
+        room::RoomId,
         user::UserId,
     },
 };
@@ -20,7 +21,7 @@ const PONG_TIMEOUT: Duration = Duration::from_secs(10);
 pub async fn handle_user_ws(
     socket: WebSocket,
     state: Arc<AppState>,
-    room_id: String,
+    room_id: RoomId,
     user_id: UserId,
 ) {
     // Register user in room and message bus
@@ -104,7 +105,7 @@ pub async fn handle_user_ws(
     cleanup_user_disconnect(&state, &room_id, &user_id).await;
 }
 
-fn handle_user_message(state: &AppState, room_id: &str, user_id: &UserId, text: &str) {
+fn handle_user_message(state: &AppState, room_id: &RoomId, user_id: &UserId, text: &str) {
     let msg: UserWebSocketMessage = match serde_json::from_str(text) {
         Ok(msg) => msg,
         Err(e) => {
@@ -126,7 +127,7 @@ fn handle_user_message(state: &AppState, room_id: &str, user_id: &UserId, text: 
     }
 }
 
-async fn cleanup_user_disconnect(state: &AppState, room_id: &str, user_id: &UserId) {
+async fn cleanup_user_disconnect(state: &AppState, room_id: &RoomId, user_id: &UserId) {
     tracing::info!(
         "User {} disconnected from room {}",
         user_id.as_str(),

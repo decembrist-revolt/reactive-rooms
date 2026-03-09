@@ -17,9 +17,10 @@ use crate::{
     auth::Role,
     domain::{
         event::DisconnectReason,
-        room::{Room, RoomType},
+        room::{Room, RoomId, RoomType},
         user::UserId,
     },
+    storage::CreateRoomError,
 };
 
 pub async fn create_room(
@@ -48,7 +49,7 @@ pub async fn create_room(
             )
                 .into_response()
         }
-        Err(_) => {
+        Err(CreateRoomError::RoomAlreadyExists) => {
             tracing::error!(
                 "Failed to create room for host {} and type {}: room already exists",
                 body.host_id,
@@ -56,26 +57,32 @@ pub async fn create_room(
             );
             (StatusCode::CONFLICT, "Room already exists").into_response()
         }
+        Err(CreateRoomError::RoomLimitReached) => {
+            tracing::error!("Room limit reached");
+            (StatusCode::SERVICE_UNAVAILABLE, "Room limit reached").into_response()
+        }
     }
 }
 
 pub async fn cancel_room(
     Extension(token): Extension<KeycloakToken<Role>>,
     State(state): State<Arc<AppState>>,
-    Path(room_id): Path<String>,
+    Path(room_id_str): Path<String>,
 ) -> impl IntoResponse {
     expect_role!(&token, Role::Admin);
 
-    let room = match state.storage.get_room(&room_id) {
-        Some(room) => room,
+    let room_id = match room_id_str.parse::<RoomId>() {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid room ID").into_response(),
+    };
+
+    let (room, users) = match state.storage.remove_room_with_users(&room_id) {
+        Some(result) => result,
         None => {
             tracing::warn!("Attempted to delete non-existent room {}", room_id);
             return (StatusCode::NOT_FOUND, "Room not found").into_response();
         }
     };
-
-    // Get all users before removing the room
-    let users = state.storage.clear_room_users(&room_id);
 
     // Disconnect all users
     state
@@ -86,9 +93,6 @@ pub async fn cancel_room(
     state
         .message_bus
         .disconnect_host(&room_id, &room.host_id, DisconnectReason::RoomClosed);
-
-    // Remove room
-    state.storage.remove_room(&room_id);
 
     tracing::info!("Room {} deleted by user {}", room_id, token.subject);
     StatusCode::NO_CONTENT.into_response()
@@ -112,10 +116,9 @@ pub async fn list_rooms(
     let rooms: Vec<RoomWithPlayerCount> = rooms
         .into_iter()
         .map(|room| {
-            let room_id_str = room.id.to_string();
-            let player_count = state.storage.get_room_user_count(&room_id_str);
+            let player_count = state.storage.get_room_user_count(&room.id);
             RoomWithPlayerCount {
-                room_id: room_id_str,
+                room_id: room.id.to_string(),
                 host_id: room.host_id.as_str().to_string(),
                 room_type: room.room_type.as_str().to_string(),
                 player_count,
