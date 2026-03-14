@@ -1,22 +1,16 @@
-use std::sync::Arc;
-use std::time::Duration;
-
-use axum::extract::ws::{Message as WsMessage, WebSocket};
-use futures_util::{SinkExt, StreamExt};
-use tokio::time::{Instant, interval};
-
+use super::ping::PingTracker;
 use crate::{
     AppState,
     domain::{
-        event::ToUserEvent,
+        event::{FromUserEvent, ToUserEvent},
         message::{ToHostMessage, UserWebSocketMessage},
         room::RoomId,
         user::UserId,
     },
 };
-
-const PING_INTERVAL: Duration = Duration::from_secs(30);
-const PONG_TIMEOUT: Duration = Duration::from_secs(10);
+use axum::extract::ws::{Message as WsMessage, WebSocket};
+use futures_util::{SinkExt, StreamExt};
+use std::sync::Arc;
 
 pub async fn handle_user_ws(
     socket: WebSocket,
@@ -24,23 +18,18 @@ pub async fn handle_user_ws(
     room_id: RoomId,
     user_id: UserId,
 ) {
-    // Register user in room and message bus
     state.storage.add_user_to_room(&room_id, user_id.clone());
     let mut bus_rx = state.message_bus.register_user(&user_id, &room_id);
 
-    // Notify host of user join
     state
         .message_bus
         .send_to_host(&room_id, ToHostMessage::join_room(user_id.clone()));
 
     let (mut ws_sender, mut ws_receiver) = socket.split();
-    let mut ping_interval = interval(PING_INTERVAL);
-    ping_interval.tick().await; // consume first immediate tick
-    let mut pong_deadline: Option<Instant> = None;
+    let mut ping = PingTracker::new().await;
 
     loop {
         tokio::select! {
-            // Message from host via bus -> forward to user WS
             msg = bus_rx.recv() => {
                 match msg {
                     Some(msg) => {
@@ -59,25 +48,17 @@ pub async fn handle_user_ws(
                             break;
                         }
                     }
-                    None => {
-                        // Channel closed (host disconnected / room closed)
-                        break;
-                    }
+                    None => break,
                 }
             }
 
-            // Message from user WS -> route to host
             ws_msg = ws_receiver.next() => {
                 match ws_msg {
                     Some(Ok(WsMessage::Text(text))) => {
                         handle_user_message(&state, &room_id, &user_id, &text);
                     }
-                    Some(Ok(WsMessage::Pong(_))) => {
-                        pong_deadline = None;
-                    }
-                    Some(Ok(WsMessage::Close(_))) | None => {
-                        break;
-                    }
+                    Some(Ok(WsMessage::Pong(_))) => ping.on_pong(),
+                    Some(Ok(WsMessage::Close(_))) | None => break,
                     Some(Err(e)) => {
                         tracing::error!("WebSocket error for user {}: {}", user_id.as_str(), e);
                         break;
@@ -86,22 +67,18 @@ pub async fn handle_user_ws(
                 }
             }
 
-            // Ping tick
-            _ = ping_interval.tick() => {
-                if let Some(deadline) = pong_deadline
-                    && Instant::now() > deadline {
-                        tracing::warn!("User {} pong timeout, disconnecting", user_id.as_str());
-                        break;
-                    }
+            _ = ping.interval.tick() => {
+                if !ping.on_tick() {
+                    tracing::warn!("User {} pong timeout, disconnecting", user_id.as_str());
+                    break;
+                }
                 if ws_sender.send(WsMessage::Ping(vec![].into())).await.is_err() {
                     break;
                 }
-                pong_deadline = Some(Instant::now() + PONG_TIMEOUT);
             }
         }
     }
 
-    // Cleanup
     cleanup_user_disconnect(&state, &room_id, &user_id).await;
 }
 
@@ -114,15 +91,12 @@ fn handle_user_message(state: &AppState, room_id: &RoomId, user_id: &UserId, tex
         }
     };
 
-    match msg.event.as_str() {
-        "MESSAGE" => {
+    match msg.event {
+        FromUserEvent::Message => {
             state.message_bus.send_to_host(
                 room_id,
                 ToHostMessage::message(user_id.clone(), msg.message),
             );
-        }
-        other => {
-            tracing::warn!("Unknown event '{}' from user {}", other, user_id.as_str());
         }
     }
 }
@@ -134,13 +108,8 @@ async fn cleanup_user_disconnect(state: &AppState, room_id: &RoomId, user_id: &U
         room_id
     );
 
-    // Remove user from room
     state.storage.remove_user_from_room(room_id, user_id);
-
-    // Unregister user channel
     state.message_bus.unregister_user(user_id, room_id);
-
-    // Notify host that user left
     state
         .message_bus
         .send_to_host(room_id, ToHostMessage::leave_room(user_id.clone()));

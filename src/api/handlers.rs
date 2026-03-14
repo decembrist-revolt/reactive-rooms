@@ -1,18 +1,11 @@
-use std::sync::Arc;
-
-use axum::{
-    Extension, Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-    response::IntoResponse,
-};
-use axum_keycloak_auth::{decode::KeycloakToken, expect_role};
-
 use crate::{
     AppState,
-    api::dto::{
-        CreateRoomRequest, CreateRoomResponse, PaginationParams, RoomWithPlayerCount,
-        RoomsPageResponse,
+    api::{
+        dto::{
+            CreateRoomRequest, CreateRoomResponse, PaginationParams, RoomWithPlayerCount,
+            RoomsPageResponse,
+        },
+        error_response,
     },
     auth::Role,
     domain::{
@@ -22,6 +15,14 @@ use crate::{
     },
     storage::CreateRoomError,
 };
+use axum::{
+    Extension, Json,
+    extract::{Path, Query, State},
+    http::StatusCode,
+    response::IntoResponse,
+};
+use axum_keycloak_auth::{decode::KeycloakToken, expect_role};
+use std::sync::Arc;
 
 pub async fn create_room(
     Extension(token): Extension<KeycloakToken<Role>>,
@@ -29,6 +30,14 @@ pub async fn create_room(
     Json(body): Json<CreateRoomRequest>,
 ) -> impl IntoResponse {
     expect_role!(&token, Role::Admin);
+
+    if body.host_id.is_empty() {
+        return error_response(StatusCode::BAD_REQUEST, "hostId must not be empty").into_response();
+    }
+
+    if body.room_type.is_empty() {
+        return error_response(StatusCode::BAD_REQUEST, "type must not be empty").into_response();
+    }
 
     let room = Room::new(UserId::new(&body.host_id), RoomType::new(&body.room_type));
 
@@ -55,11 +64,11 @@ pub async fn create_room(
                 body.host_id,
                 body.room_type,
             );
-            (StatusCode::CONFLICT, "Room already exists").into_response()
+            error_response(StatusCode::CONFLICT, "Room already exists").into_response()
         }
         Err(CreateRoomError::RoomLimitReached) => {
             tracing::error!("Room limit reached");
-            (StatusCode::SERVICE_UNAVAILABLE, "Room limit reached").into_response()
+            error_response(StatusCode::SERVICE_UNAVAILABLE, "Room limit reached").into_response()
         }
     }
 }
@@ -73,23 +82,23 @@ pub async fn cancel_room(
 
     let room_id = match room_id_str.parse::<RoomId>() {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid room ID").into_response(),
+        Err(_) => {
+            return error_response(StatusCode::BAD_REQUEST, "Invalid room ID").into_response();
+        }
     };
 
     let (room, users) = match state.storage.remove_room_with_users(&room_id) {
         Some(result) => result,
         None => {
             tracing::warn!("Attempted to delete non-existent room {}", room_id);
-            return (StatusCode::NOT_FOUND, "Room not found").into_response();
+            return error_response(StatusCode::NOT_FOUND, "Room not found").into_response();
         }
     };
 
-    // Disconnect all users
     state
         .message_bus
         .disconnect_room_users(&room_id, &users, DisconnectReason::RoomClosed);
 
-    // Disconnect host
     state
         .message_bus
         .disconnect_host(&room_id, &room.host_id, DisconnectReason::RoomClosed);
@@ -109,7 +118,8 @@ pub async fn list_rooms(
     let size = params.size.unwrap_or(10);
 
     if size == 0 || size > 100 {
-        return (StatusCode::BAD_REQUEST, "Invalid pagination parameters").into_response();
+        return error_response(StatusCode::BAD_REQUEST, "Invalid pagination parameters")
+            .into_response();
     }
 
     let (rooms, total) = state.storage.get_rooms_paginated(page, size);

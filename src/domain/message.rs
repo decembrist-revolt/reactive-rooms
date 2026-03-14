@@ -1,14 +1,14 @@
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-
 use super::{
-    event::{DisconnectReason, ToHostEvent, ToUserEvent},
+    event::{DisconnectReason, FromHostEvent, FromUserEvent, ToHostEvent, ToUserEvent},
     user::UserId,
 };
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 pub type MessagePayload = Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToHostMessage {
     pub event: ToHostEvent,
     pub user_id: UserId,
@@ -51,6 +51,7 @@ impl ToHostMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToUserMessage {
     pub event: ToUserEvent,
     pub user_id: UserId,
@@ -76,15 +77,16 @@ impl ToUserMessage {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct UserWebSocketMessage {
-    pub event: String,
+    pub event: FromUserEvent,
     pub message: MessagePayload,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HostWebSocketMessage {
-    pub event: String,
+    pub event: FromHostEvent,
     pub user_id: UserId,
-    pub message: MessagePayload,
+    pub message: Option<MessagePayload>,
 }

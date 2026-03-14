@@ -1,8 +1,12 @@
 mod host;
+mod ping;
 mod user;
 
-use std::sync::Arc;
-
+use crate::{
+    AppState,
+    auth::{Role, has_role},
+    domain::{room::RoomId, user::UserId},
+};
 use axum::{
     Extension,
     extract::{Query, State, WebSocketUpgrade},
@@ -10,13 +14,16 @@ use axum::{
     response::IntoResponse,
 };
 use axum_keycloak_auth::decode::KeycloakToken;
+use serde::Deserialize;
+use std::sync::Arc;
 
-use crate::{
-    AppState,
-    api::dto::WsQueryParams,
-    auth::{Role, has_role},
-    domain::{room::RoomId, user::UserId},
-};
+#[derive(Deserialize)]
+pub(crate) struct WsQueryParams {
+    #[serde(rename = "roomId")]
+    room_id: String,
+    #[serde(rename = "type")]
+    connection_type: String,
+}
 
 pub async fn websocket_handler(
     Extension(token): Extension<KeycloakToken<Role>>,
@@ -25,7 +32,6 @@ pub async fn websocket_handler(
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     let user_id = UserId::new(&token.subject);
-
     let room_id = match params.room_id.parse::<RoomId>() {
         Ok(id) => id,
         Err(_) => {
@@ -37,7 +43,6 @@ pub async fn websocket_handler(
         }
     };
 
-    // Validate room exists
     let room = match state.storage.get_room(&room_id) {
         Some(room) => room,
         None => {
@@ -48,7 +53,6 @@ pub async fn websocket_handler(
 
     match params.connection_type.as_str() {
         "host" => {
-            // Verify user has host role
             if !has_role(&token, &Role::Host) {
                 tracing::warn!(
                     "User {} attempted host connection without host role",
@@ -57,7 +61,6 @@ pub async fn websocket_handler(
                 return (StatusCode::FORBIDDEN, "Host role required").into_response();
             }
 
-            // Verify user is the room's host
             if !room.is_host(&user_id) {
                 tracing::warn!(
                     "User {} attempted host connection to room {} but is not the host",
@@ -73,7 +76,6 @@ pub async fn websocket_handler(
                 .into_response()
         }
         "user" => {
-            // Verify user has user role
             if !has_role(&token, &Role::User) {
                 tracing::warn!(
                     "User {} attempted connection without user role",

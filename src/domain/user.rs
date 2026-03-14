@@ -12,16 +12,3 @@ impl UserId {
         &self.0
     }
 }
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct User {
-    pub id: UserId,
-}
-
-#[allow(dead_code)]
-impl User {
-    pub fn new(id: UserId) -> Self {
-        Self { id }
-    }
-}

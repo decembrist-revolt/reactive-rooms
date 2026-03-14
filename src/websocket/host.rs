@@ -1,22 +1,16 @@
-use std::sync::Arc;
-use std::time::Duration;
-
-use axum::extract::ws::{Message as WsMessage, WebSocket};
-use futures_util::{SinkExt, StreamExt};
-use tokio::time::{Instant, interval};
-
+use super::ping::PingTracker;
 use crate::{
     AppState,
     domain::{
-        event::{DisconnectReason, ToHostEvent},
+        event::{DisconnectReason, FromHostEvent, ToHostEvent},
         message::{HostWebSocketMessage, ToUserMessage},
         room::RoomId,
         user::UserId,
     },
 };
-
-const PING_INTERVAL: Duration = Duration::from_secs(30);
-const PONG_TIMEOUT: Duration = Duration::from_secs(10);
+use axum::extract::ws::{Message as WsMessage, WebSocket};
+use futures_util::{SinkExt, StreamExt};
+use std::sync::Arc;
 
 pub async fn handle_host_ws(
     socket: WebSocket,
@@ -26,24 +20,15 @@ pub async fn handle_host_ws(
 ) {
     let (mut ws_sender, mut ws_receiver) = socket.split();
     let mut bus_rx = state.message_bus.register_host(&room_id);
-    let mut ping_interval = interval(PING_INTERVAL);
-    ping_interval.tick().await; // consume first immediate tick
-    let mut pong_deadline: Option<Instant> = None;
+    let mut ping = PingTracker::new().await;
 
     loop {
         tokio::select! {
-            // Message from a user via the bus -> forward to host WS
             msg = bus_rx.recv() => {
                 match msg {
                     Some(msg) => {
-                        // If this is a disconnect message for the host, break
-                        if matches!(msg.event, ToHostEvent::Disconnect)
-                            && msg.user_id == host_id
-                        {
-                            let json = serde_json::to_string(&msg).unwrap();
-                            let _ = ws_sender.send(WsMessage::Text(json.into())).await;
-                            break;
-                        }
+                        let is_host_disconnect = matches!(msg.event, ToHostEvent::Disconnect)
+                            && msg.user_id == host_id;
 
                         match serde_json::to_string(&msg) {
                             Ok(json) => {
@@ -56,26 +41,22 @@ pub async fn handle_host_ws(
                                 tracing::error!("Failed to serialize message for host: {}", e);
                             }
                         }
+
+                        if is_host_disconnect {
+                            break;
+                        }
                     }
-                    None => {
-                        // Channel closed
-                        break;
-                    }
+                    None => break,
                 }
             }
 
-            // Message from host WS -> route to target user
             ws_msg = ws_receiver.next() => {
                 match ws_msg {
                     Some(Ok(WsMessage::Text(text))) => {
                         handle_host_message(&state, &room_id, &host_id, &text);
                     }
-                    Some(Ok(WsMessage::Pong(_))) => {
-                        pong_deadline = None;
-                    }
-                    Some(Ok(WsMessage::Close(_))) | None => {
-                        break;
-                    }
+                    Some(Ok(WsMessage::Pong(_))) => ping.on_pong(),
+                    Some(Ok(WsMessage::Close(_))) | None => break,
                     Some(Err(e)) => {
                         tracing::error!("WebSocket error for host {}: {}", host_id.as_str(), e);
                         break;
@@ -84,22 +65,18 @@ pub async fn handle_host_ws(
                 }
             }
 
-            // Ping tick
-            _ = ping_interval.tick() => {
-                if let Some(deadline) = pong_deadline
-                    && Instant::now() > deadline {
-                        tracing::warn!("Host {} pong timeout, disconnecting", host_id.as_str());
-                        break;
-                    }
+            _ = ping.interval.tick() => {
+                if !ping.on_tick() {
+                    tracing::warn!("Host {} pong timeout, disconnecting", host_id.as_str());
+                    break;
+                }
                 if ws_sender.send(WsMessage::Ping(vec![].into())).await.is_err() {
                     break;
                 }
-                pong_deadline = Some(Instant::now() + PONG_TIMEOUT);
             }
         }
     }
 
-    // Cleanup
     cleanup_host_disconnect(&state, &room_id, &host_id).await;
 }
 
@@ -114,7 +91,6 @@ fn handle_host_message(state: &AppState, room_id: &RoomId, host_id: &UserId, tex
 
     let target_user_id = &msg.user_id;
 
-    // Check if target user is in the room
     if !state.storage.is_user_in_room(room_id, target_user_id) {
         tracing::warn!(
             "Host {} tried to send to user {} who is not in room {}",
@@ -125,24 +101,20 @@ fn handle_host_message(state: &AppState, room_id: &RoomId, host_id: &UserId, tex
         return;
     }
 
-    match msg.event.as_str() {
-        "MESSAGE" => {
+    match msg.event {
+        FromHostEvent::Message => {
             state.message_bus.send_to_user(
                 target_user_id,
                 room_id,
-                ToUserMessage::message(target_user_id.clone(), msg.message),
+                ToUserMessage::message(target_user_id.clone(), msg.message.unwrap_or_default()),
             );
         }
-        "DISCONNECT" => {
-            // Host kicks user
+        FromHostEvent::Disconnect => {
             state.message_bus.send_to_user(
                 target_user_id,
                 room_id,
                 ToUserMessage::disconnect(target_user_id.clone(), DisconnectReason::Kicked),
             );
-        }
-        other => {
-            tracing::warn!("Unknown event '{}' from host {}", other, host_id.as_str());
         }
     }
 }
@@ -154,10 +126,8 @@ async fn cleanup_host_disconnect(state: &AppState, room_id: &RoomId, host_id: &U
         room_id
     );
 
-    // Unregister host channel
     state.message_bus.unregister_host(room_id);
 
-    // Remove room and get all users atomically
     if let Some((_, users)) = state.storage.remove_room_with_users(room_id) {
         state
             .message_bus

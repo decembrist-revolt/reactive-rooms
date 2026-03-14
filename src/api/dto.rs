@@ -38,11 +38,3 @@ pub struct PaginationParams {
     pub page: Option<usize>,
     pub size: Option<usize>,
 }
-
-#[derive(Deserialize)]
-pub struct WsQueryParams {
-    #[serde(rename = "roomId")]
-    pub room_id: String,
-    #[serde(rename = "type")]
-    pub connection_type: String,
-}

@@ -5,7 +5,7 @@ mod message_bus;
 mod storage;
 mod websocket;
 
-use api::{not_found, ping};
+use api::{health, not_found};
 use axum::{
     Router,
     extract::DefaultBodyLimit,
@@ -48,7 +48,6 @@ impl Server {
         let cors = Self::init_cors();
         let audience = auth::keycloak_audience();
 
-        // WebSocket auth layer uses query param token extraction
         let ws_keycloak_layer = KeycloakAuthLayer::<auth::Role>::builder()
             .instance(auth::keycloak().clone())
             .passthrough_mode(PassthroughMode::Block)
@@ -60,18 +59,11 @@ impl Server {
             })
             .build();
 
-        // WebSocket route with query param auth
         let ws_routes = Router::new()
             .route("/websocket", routing::get(websocket::websocket_handler))
             .layer(ws_keycloak_layer);
-
-        // REST routes with Bearer token auth (layer applied inside routes module)
         let rest_routes = api::routes::room_routes();
-
-        // Public routes
-        let public_routes = Router::new()
-            .route("/ping", routing::get(ping))
-            .route("/health", routing::get(ping));
+        let public_routes = Router::new().route("/api/health", routing::get(health));
 
         Router::new()
             .merge(public_routes)
@@ -105,9 +97,11 @@ impl Server {
     fn init_cors() -> CorsLayer {
         use axum::http::HeaderValue;
 
-        let origins = read_env_var("ORIGINS", "[http://localhost:8080,http://127.0.0.1:8080]")
+        let origins = read_env_var("ORIGINS", "http://localhost:8080,http://127.0.0.1:8080")
+            .trim_matches(|c| c == '[' || c == ']')
             .split(',')
             .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
             .map(|s| HeaderValue::from_str(s).expect("Invalid origin in ORIGINS"))
             .collect::<Vec<_>>();
 
@@ -132,7 +126,36 @@ impl Server {
 
         tracing::info!("listening on http://{}", listener.local_addr().unwrap());
 
-        axum::serve(listener, router).await.unwrap()
+        axum::serve(listener, router)
+            .with_graceful_shutdown(shutdown_signal())
+            .await
+            .unwrap()
+    }
+}
+
+async fn shutdown_signal() {
+    use tokio::signal;
+
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => tracing::info!("received Ctrl+C, shutting down"),
+        _ = terminate => tracing::info!("received SIGTERM, shutting down"),
     }
 }
 
