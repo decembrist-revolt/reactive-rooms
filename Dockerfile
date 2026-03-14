@@ -13,6 +13,7 @@ COPY src src
 RUN cargo build --target x86_64-unknown-linux-musl --release
 
 FROM scratch
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /usr/src/app/target/x86_64-unknown-linux-musl/release/reactive-chat-rust /usr/local/bin/reactive-chat-rust
 USER 1000
 WORKDIR /app
