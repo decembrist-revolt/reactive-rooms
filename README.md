@@ -6,9 +6,10 @@ Rust-порт проекта [reactive-rooms](https://github.com/decembrist-mark
 
 - **Web-фреймворк**: Axum
 - **Аутентификация**: Keycloak (OIDC/JWT) через `axum-keycloak-auth`
-- **Хранилище**: In-memory DashMap (комнаты и участники)
+- **Хранилище**: In-memory DashMap (комнаты и участники, лимит настраивается через `MAX_ROOMS`)
 - **Message Bus**: Tokio MPSC-каналы (замена Vert.x Event Bus)
 - **WebSocket**: встроенная поддержка Axum
+- **Graceful shutdown**: обработка SIGTERM/Ctrl+C
 
 ## Роли (OAuth2 scopes)
 
@@ -25,7 +26,8 @@ Rust-порт проекта [reactive-rooms](https://github.com/decembrist-mark
 ```env
 HOST=0.0.0.0
 PORT=3001
-ORIGINS=[http://localhost:8080,http://127.0.0.1:8080]
+ORIGINS=http://localhost:8080,http://127.0.0.1:8080
+MAX_ROOMS=10000
 KEYCLOAK_SERVER=https://localhost:8443/
 KEYCLOAK_REALM=decembrist-market
 KEYCLOAK_AUDIENCE=account
@@ -35,7 +37,7 @@ KEYCLOAK_AUDIENCE=account
 
 ```env
 RUST_LOG=reactive_chat_rust=info   # только логи приложения
-RUST_LOG=debug                      # всё, включая внешние крейты
+RUST_LOG=debug                     # всё, включая внешние крейты
 ```
 
 ## Запуск
@@ -44,6 +46,16 @@ RUST_LOG=debug                      # всё, включая внешние кр
 cp .env.exampl .env
 # отредактируй .env
 RUST_LOG=info cargo run
+```
+
+## Docker
+
+```bash
+docker build -t reactive-chat-rust .
+docker run -p 3000:3000 \
+  -e KEYCLOAK_SERVER=https://keycloak.example.com \
+  -e KEYCLOAK_REALM=my-realm \
+  reactive-chat-rust
 ```
 
 ## Запуск Keycloak (для разработки)
@@ -63,8 +75,7 @@ docker run -p 8080:8080 \
 ### Публичные эндпоинты
 
 ```
-GET /ping     → {"ping": "pong!"}
-GET /health   → {"ping": "pong!"}
+GET /api/health   → {"status": "UP"}
 ```
 
 ### REST API (требует Bearer токен с ролью Admin)
@@ -116,7 +127,15 @@ Authorization: Bearer <token>
 → 204 No Content
 ```
 
-При удалении все подключённые участники получают событие `Disconnect` с причиной `RoomClosed`.
+При удалении все подключённые участники получают событие `DISCONNECT` с причиной `ROOM_CLOSED`.
+
+### Ошибки
+
+Все ошибки возвращаются в формате JSON:
+
+```json
+{ "error": "Room not found" }
+```
 
 ### WebSocket
 
@@ -144,24 +163,31 @@ GET /websocket?token=<jwt>&roomId=<uuid>&type=host|user
 
 ```json
 { "event": "MESSAGE",    "userId": "<userId>", "message": { } }
-{ "event": "DISCONNECT", "userId": "<userId>", "message": { "reason": "Kicked" } }
+{ "event": "DISCONNECT", "userId": "<userId>" }
 ```
 
 #### Сообщения, которые получает хост
 
 ```json
-{ "event": "JoinRoom",   "user_id": "<userId>" }
-{ "event": "LeaveRoom",  "user_id": "<userId>" }
-{ "event": "Message",    "user_id": "<userId>", "message": { } }
-{ "event": "Disconnect", "user_id": "<userId>", "message": { "reason": "UserClosed" } }
+{ "event": "JOIN_ROOM",   "userId": "<userId>" }
+{ "event": "LEAVE_ROOM",  "userId": "<userId>" }
+{ "event": "MESSAGE",     "userId": "<userId>", "message": { } }
+{ "event": "DISCONNECT",  "userId": "<userId>", "message": { "reason": "USER_CLOSED" } }
+```
+
+#### Сообщения, которые получает участник
+
+```json
+{ "event": "MESSAGE",    "userId": "<userId>", "message": { } }
+{ "event": "DISCONNECT", "userId": "<userId>", "message": { "reason": "KICKED" } }
 ```
 
 #### Причины отключения (`DisconnectReason`)
 
 | Значение | Описание |
 |---|---|
-| `Kicked` | Участник выгнан хостом |
-| `RoomClosed` | Комната закрыта (хост отключился или DELETE /api/rooms) |
-| `UserClosed` | Участник закрыл соединение |
-| `NewConnection` | Новое соединение вытеснило старое |
-| `PingPong` | Таймаут ping/pong (30 сек интервал, 10 сек на ответ) |
+| `KICKED` | Участник выгнан хостом |
+| `ROOM_CLOSED` | Комната закрыта (хост отключился или DELETE /api/rooms) |
+| `USER_CLOSED` | Участник закрыл соединение |
+| `NEW_CONNECTION` | Новое соединение вытеснило старое |
+| `PING_PONG` | Таймаут ping/pong (30 сек интервал, 10 сек на ответ) |
